@@ -13,7 +13,7 @@
 gastコード例
 
 ```py
-aaaaaaaaaaaaaa
+justdoit
 ssssssssss
 ```
 [google](https://google.com)
