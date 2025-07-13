@@ -1,0 +1,594 @@
+
+はい、承知いたしました。
+ご提示いただいた詳細な要件定義書（最終版）に基づき、高度な機能と実用性を備えた「Excel複数ファイル データ抽出・転記システム」のVBAコードを作成します。
+保守性と可読性を考慮し、機能ごとにコードをモジュール分割する構成で実装します。
+
+-----
+
+### セットアップ手順
+
+1.  VBE（`Alt` + `F11`）を開きます。
+2.  「挿入」メニューから\*\*「標準モジュール」\*\*を4つ追加し、それぞれの名前を以下に変更します。
+      * `MainModule`
+      * `ProcessModule`
+      * `FormatOutputModule`
+      * `ErrorLogModule`
+3.  「挿入」メニューから\*\*「ユーザーフォーム」\*\*を2つ追加し、それぞれの名前を以下に変更します。
+      * `UserForm_Preview`
+      * `UserForm_Progress`
+4.  後述の\*\*「ユーザーフォームのコントロール設定」\*\*に従って、各フォームにコントロール（ボタン、ラベル等）を配置します。
+5.  各モジュールとフォームに、以下で提供するコードをそれぞれコピー＆ペーストしてください。
+
+-----
+
+### 1\. 標準モジュール: `MainModule`
+
+システムの全体的な流れを制御します。
+
+```vb
+'==============================================================================
+' Module: MainModule
+' 説明: メイン処理の呼び出しと全体管理
+'==============================================================================
+Option Explicit
+
+' --- グローバル定数 ---
+Public Const SHEET_FORMAT As String = "フォーマット"
+Public Const SHEET_MASTER As String = "マスタ"
+Public Const PREFIX_TENKI As String = "TENKI"
+
+' --- グローバル変数 ---
+Public g_StartTime As Date
+Public g_ProcessedCount As Long
+Public g_ErrorCount As Long
+Public g_LogText As String
+
+'==============================================================================
+' ■ メイン実行プロシージャ
+'   このマクロを実行すると処理が開始されます。
+'==============================================================================
+Sub データ転記実行()
+    On Error GoTo ErrorHandler
+    
+    Application.ScreenUpdating = False
+
+    ' 1. 前提条件チェック
+    If Not CheckPrerequisites() Then Exit Sub
+
+    ' 2. プレビューフォームを表示
+    '    フォームが閉じられるまでここで待機
+    UserForm_Preview.Show
+
+    ' フォームが非表示にされた後（実行ボタンが押された後）の処理は
+    ' UserForm_Preview のコードから ProcessModule.転記処理実行 が呼び出される
+
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "予期せぬエラーが発生しました。" & vbCrLf & "エラー内容: " & Err.Description, vbCritical, "システムエラー"
+    Application.ScreenUpdating = True
+End Sub
+
+
+'==============================================================================
+' 1. 前提条件チェック
+'==============================================================================
+Private Function CheckPrerequisites() As Boolean
+    On Error Resume Next
+    Dim wsFormat As Worksheet
+    Dim wsMaster As Worksheet
+
+    Set wsFormat = ThisWorkbook.Worksheets(SHEET_FORMAT)
+    If wsFormat Is Nothing Then
+        MsgBox "「" & SHEET_FORMAT & "」シートが見つかりません。", vbCritical, "前提条件エラー"
+        CheckPrerequisites = False
+        Exit Function
+    End If
+
+    Set wsMaster = ThisWorkbook.Worksheets(SHEET_MASTER)
+    If wsMaster Is Nothing Then
+        MsgBox "「" & SHEET_MASTER & "」シートが見つかりません。", vbCritical, "前提条件エラー"
+        CheckPrerequisites = False
+        Exit Function
+    End If
+    
+    CheckPrerequisites = True
+End Function
+```
+
+-----
+
+### 2\. 標準モジュール: `ProcessModule`
+
+ファイルリスト取得、データ抽出、転記のコア処理を担当します。
+
+```vb
+'==============================================================================
+' Module: ProcessModule
+' 説明: データ抽出・転記のコア処理
+'==============================================================================
+Option Explicit
+
+' 転記情報を格納するユーザー定義型
+Public Type TenkiInfo
+    Address As String
+    Row As Long
+    Column As Long
+    Num As Long
+End Type
+
+'==============================================================================
+' 3. メイン処理実行
+'==============================================================================
+Public Function 転記処理実行() As Boolean
+    On Error GoTo ErrorHandler
+    
+    Dim fileList As Collection
+    Dim tenkiCells As Collection
+    Dim wsResult As Worksheet
+    Dim i As Long
+
+    ' --- 初期化 ---
+    g_StartTime = Now
+    g_ProcessedCount = 0
+    g_ErrorCount = 0
+    g_LogText = ""
+    
+    転記処理実行 = False
+    Application.ScreenUpdating = False
+
+    ' 3.1 ファイルリスト取得
+    Set fileList = GetFileList()
+    If fileList.Count = 0 Then
+        MsgBox "処理対象ファイルが見つかりません。「マスタ」シートを確認してください。", vbInformation, "確認"
+        Exit Function
+    End If
+
+    ' 3.2 転記セル情報取得
+    Set tenkiCells = GetTenkiCellInfo()
+    If tenkiCells.Count = 0 Then
+        MsgBox "転記対象セル（TENKI**）が見つかりません。「フォーマット」シートを確認してください。", vbInformation, "確認"
+        Exit Function
+    End If
+
+    ' 3.3 結果シート作成
+    Set wsResult = CreateResultSheet()
+
+    ' --- 進捗フォーム表示 ---
+    UserForm_Progress.Show vbModeless
+
+    ' 3.4 データ転記処理（ループ）
+    For i = 1 To fileList.Count
+        ' 進捗更新
+        UserForm_Progress.UpdateProgress i, fileList.Count, CStr(fileList(i))
+        
+        ' データ抽出・転記
+        TransferDataFromFile CStr(fileList(i)), tenkiCells, wsResult, i + 2 'ヘッダー+サマリーの次の行から
+    Next i
+
+    ' 4. 後処理
+    Unload UserForm_Progress
+    
+    ' 4.1 結果シート整形
+    FormatOutputModule.FormatResultSheet wsResult, tenkiCells
+    ' 4.2 サマリー追加
+    FormatOutputModule.AddSummary wsResult
+    
+    Application.Goto wsResult.Range("A1"), True
+    wsResult.Activate
+
+    ' 4.3 エラーログ出力
+    If g_ErrorCount > 0 Then
+        ErrorLogModule.OutputErrorLog
+    End If
+
+    MsgBox "転記処理が完了しました。" & vbCrLf & vbCrLf & _
+           "処理ファイル数: " & g_ProcessedCount & " 件" & vbCrLf & _
+           "エラー数: " & g_ErrorCount & " 件", vbInformation, "完了"
+           
+    転記処理実行 = True
+    Application.ScreenUpdating = True
+    Exit Function
+
+ErrorHandler:
+    MsgBox "転記処理中にエラーが発生しました。" & vbCrLf & "エラー内容: " & Err.Description, vbCritical, "処理エラー"
+    If Not UserForm_Progress Is Nothing Then Unload UserForm_Progress
+    Application.ScreenUpdating = True
+End Function
+
+
+' --- ヘルパー関数 ---
+
+Private Function GetFileList() As Collection
+    Dim wsMaster As Worksheet
+    Dim list As New Collection
+    Dim lastRow As Long, i As Long
+    Dim folderPath As String, fileName As String, fullPath As String
+    
+    Set wsMaster = ThisWorkbook.Worksheets(SHEET_MASTER)
+    lastRow = wsMaster.Cells(wsMaster.Rows.Count, "A").End(xlUp).Row
+    
+    For i = 2 To lastRow
+        folderPath = Trim(wsMaster.Cells(i, 1).Value)
+        fileName = Trim(wsMaster.Cells(i, 2).Value)
+        
+        If folderPath <> "" And fileName <> "" Then
+            ' 相対パス対応
+            If Left(folderPath, 1) <> "\" And InStr(folderPath, ":") = 0 Then
+                folderPath = ThisWorkbook.Path & "\" & folderPath
+            End If
+            ' パス区切り文字を追加
+            If Right(folderPath, 1) <> "\" Then folderPath = folderPath & "\"
+            
+            fullPath = folderPath & fileName
+            
+            ' ファイル存在チェック
+            If Dir(fullPath) <> "" Then
+                list.Add fullPath
+            Else
+                g_ErrorCount = g_ErrorCount + 1
+                ErrorLogModule.AddLog "ファイル欠落", "ファイルが見つかりません: " & fullPath
+            End If
+        End If
+    Next i
+    Set GetFileList = list
+End Function
+
+
+Private Function GetTenkiCellInfo() As Collection
+    Dim wsFormat As Worksheet
+    Dim list As New Collection
+    Dim cell As Range
+    Dim info As TenkiInfo
+    
+    Set wsFormat = ThisWorkbook.Worksheets(SHEET_FORMAT)
+    
+    For Each cell In wsFormat.UsedRange
+        If UCase(Left(cell.Value, Len(PREFIX_TENKI))) = UCase(PREFIX_TENKI) Then
+            info.Num = Val(Mid(cell.Value, Len(PREFIX_TENKI) + 1))
+            If info.Num > 0 Then
+                info.Address = cell.Address(False, False)
+                info.Row = cell.Row
+                info.Column = cell.Column
+                list.Add info, CStr(info.Num)
+            End If
+        End If
+    Next cell
+    Set GetTenkiCellInfo = list
+End Function
+
+
+Private Function CreateResultSheet() As Worksheet
+    Dim sheetName As String
+    sheetName = "転記結果_" & Format(Now, "YYYYMMDD_HHMMSS")
+    Set CreateResultSheet = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+    CreateResultSheet.Name = sheetName
+End Function
+
+
+Private Sub TransferDataFromFile(ByVal filePath As String, ByVal tenkiCells As Collection, ByVal wsResult As Worksheet, ByVal outputRow As Long)
+    On Error GoTo ErrorHandler
+    
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim info As TenkiInfo
+    
+    ' 読み取り専用でファイルを開く
+    Set wb = Workbooks.Open(Filename:=filePath, ReadOnly:=True, UpdateLinks:=0)
+    Set ws = wb.Worksheets(1) ' 最初のシートを対象とする
+    
+    wsResult.Cells(outputRow, 1).Value = Mid(filePath, InStrRev(filePath, "\") + 1)
+    
+    For Each info In tenkiCells
+        On Error Resume Next ' 結合セル等のエラーを許容
+        wsResult.Cells(outputRow, info.Num + 1).Value = ws.Cells(info.Row, info.Column).Value
+        If Err.Number <> 0 Then
+             ErrorLogModule.AddLog "データ抽出エラー", filePath & " の " & info.Address & " から値を取得できませんでした。"
+        End If
+        On Error GoTo ErrorHandler
+    Next info
+    
+    wb.Close SaveChanges:=False
+    g_ProcessedCount = g_ProcessedCount + 1
+    Exit Sub
+
+ErrorHandler:
+    g_ErrorCount = g_ErrorCount + 1
+    ErrorLogModule.AddLog "ファイルエラー", filePath & " - " & Err.Description
+    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+End Sub
+```
+
+-----
+
+### 3\. 標準モジュール: `FormatOutputModule`
+
+結果シートの整形、サマリー追加を担当します。
+
+```vb
+'==============================================================================
+' Module: FormatOutputModule
+' 説明: 結果シートの整形、サマリー追加
+'==============================================================================
+Option Explicit
+
+'==============================================================================
+' 4.1 結果シートの整形
+'==============================================================================
+Public Sub FormatResultSheet(ByVal ws As Worksheet, ByVal tenkiCells As Collection)
+    Dim lastRow As Long
+    Dim lastCol As Long
+    Dim info As ProcessModule.TenkiInfo
+    
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    lastCol = tenkiCells.Count + 1 ' ファイル名列 + TENKI列数
+    
+    If lastRow < 3 Then Exit Sub
+
+    ' --- ヘッダー生成 ---
+    ws.Cells(3, 1).Value = "処理ファイル名"
+    For Each info In tenkiCells
+        ws.Cells(3, info.Num + 1).Value = "TENKI" & Format(info.Num, "00")
+    Next info
+    
+    With ws.Range(ws.Cells(3, 1), ws.Cells(3, lastCol))
+        .Interior.Color = RGB(79, 129, 189) ' 濃い青
+        .Font.Color = vbWhite
+        .Font.Bold = True
+    End With
+
+    ' --- データ行の縞模様 ---
+    Dim i As Long
+    For i = 4 To lastRow
+        If i Mod 2 = 0 Then
+            ws.Range(ws.Cells(i, 1), ws.Cells(i, lastCol)).Interior.Color = RGB(220, 230, 241) ' 薄い青
+        End If
+    Next i
+
+    ' --- 罫線 ---
+    With ws.Range(ws.Cells(3, 1), ws.Cells(lastRow, lastCol))
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+    End With
+
+    ' --- 列幅の自動調整 & ウィンドウ枠固定 ---
+    ws.Columns.AutoFit
+    ws.Activate
+    ws.Range("A4").Select
+    ActiveWindow.FreezePanes = True
+    ws.Range("A1").Select
+End Sub
+
+'==============================================================================
+' 4.2 サマリー追加
+'==============================================================================
+Public Sub AddSummary(ByVal ws As Worksheet)
+    Dim duration As String
+    duration = Format(Now - g_StartTime, "hh:mm:ss")
+
+    With ws
+        .Range("A1").Value = "■処理サマリー"
+        .Range("A1").Font.Bold = True
+        .Range("B1").Value = "処理日時: " & Format(g_StartTime, "YYYY/MM/DD HH:MM:SS")
+        .Range("C1").Value = "処理時間: " & duration
+        .Range("D1").Value = "処理ファイル数: " & g_ProcessedCount & "件"
+        .Range("E1").Value = "エラー数: " & g_ErrorCount & "件"
+    End With
+End Sub
+```
+
+-----
+
+### 4\. 標準モジュール: `ErrorLogModule`
+
+エラーログの記録と出力を担当します。
+
+```vb
+'==============================================================================
+' Module: ErrorLogModule
+' 説明: エラーログの記録と出力
+'==============================================================================
+Option Explicit
+
+'==============================================================================
+' ログ追加
+'==============================================================================
+Public Sub AddLog(ByVal errorType As String, ByVal message As String)
+    g_LogText = g_LogText & Format(Now, "HH:MM:SS") & vbTab & _
+                errorType & vbTab & message & vbCrLf
+End Sub
+
+'==============================================================================
+' 4.3 ログ出力
+'==============================================================================
+Public Sub OutputErrorLog()
+    Dim header As String
+    header = "Excelデータ転記システム エラーログ" & vbCrLf & _
+             "====================================" & vbCrLf & _
+             "処理日時: " & Format(g_StartTime, "YYYY/MM/DD HH:MM:SS") & vbCrLf & _
+             "エラー総数: " & g_ErrorCount & "件" & vbCrLf & _
+             "====================================" & vbCrLf & vbCrLf & _
+             "時刻" & vbTab & "エラー種別" & vbTab & "内容" & vbCrLf
+             
+    ' --- エラーシートへの出力 ---
+    Dim wsError As Worksheet
+    Set wsError = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+    wsError.Name = "エラーログ_" & Format(Now, "HHMMSS")
+    wsError.Range("A1").Value = header & g_LogText
+    wsError.Columns("A").EntireColumn.AutoFit
+    
+    ' --- テキストファイルへの出力 ---
+    On Error Resume Next
+    Dim fso As Object, ts As Object
+    Dim logPath As String
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    logPath = ThisWorkbook.Path & "\error_log_" & Format(Now, "YYYYMMDD_HHMMSS") & ".txt"
+    Set ts = fso.CreateTextFile(logPath, True)
+    ts.Write header & g_LogText
+    ts.Close
+    
+    MsgBox "エラーが " & g_ErrorCount & "件 発生しました。" & vbCrLf & _
+           "詳細は「" & wsError.Name & "」シートと、" & vbCrLf & _
+           "テキストログファイルを確認してください。", vbExclamation, "エラー"
+End Sub
+```
+
+-----
+
+### 5\. ユーザーフォーム: `UserForm_Preview`
+
+#### ユーザーフォームのコントロール設定
+
+| コントロール種類 | 名前 | 用途 |
+| :--- | :--- | :--- |
+| Label | LabelTitle | 「データ転記 プレビュー」などのタイトル |
+| Label | LabelFileInfo | 「対象ファイル数: X件」を表示 |
+| Label | LabelCellInfo | 「転記セル数: Y個」を表示 |
+| ListBox | ListBoxPreview | サンプルデータを表示 |
+| CommandButton | ButtonExecute | 「実行」ボタン |
+| CommandButton | ButtonCancel | 「キャンセル」ボタン |
+
+#### `UserForm_Preview` のコード
+
+```vb
+'==============================================================================
+' Form: UserForm_Preview
+' 説明: 実行前の設定確認とプレビュー
+'==============================================================================
+Option Explicit
+
+'==============================================================================
+' フォーム初期化
+'==============================================================================
+Private Sub UserForm_Initialize()
+    Dim fileList As Collection
+    Dim tenkiCells As Collection
+    Dim firstFile As String
+    Dim info As ProcessModule.TenkiInfo
+    
+    Me.Caption = "実行プレビュー"
+    Me.LabelTitle.Caption = "データ転記 プレビュー"
+    
+    ' --- 情報取得と表示 ---
+    Set fileList = ProcessModule.GetFileList
+    Set tenkiCells = ProcessModule.GetTenkiCellInfo
+    
+    Me.LabelFileInfo.Caption = "対象ファイル数: " & fileList.Count & " 件"
+    Me.LabelCellInfo.Caption = "転記セル数: " & tenkiCells.Count & " 個"
+    
+    ' --- プレビュー表示 ---
+    With Me.ListBoxPreview
+        .ColumnCount = 2
+        .ColumnWidths = "80;150"
+        .AddItem "転記項目;サンプルデータ (最初のファイルより)"
+        
+        If fileList.Count > 0 And tenkiCells.Count > 0 Then
+            firstFile = fileList(1)
+            
+            On Error Resume Next
+            Dim wb As Workbook, ws As Worksheet
+            Set wb = Workbooks.Open(firstFile, ReadOnly:=True, UpdateLinks:=0)
+            Set ws = wb.Worksheets(1)
+            
+            If Not ws Is Nothing Then
+                For Each info In tenkiCells
+                    .AddItem "TENKI" & Format(info.Num, "00") & " (" & info.Address & ");" & ws.Cells(info.Row, info.Column).Value
+                Next info
+            End If
+            
+            If Not wb Is Nothing Then wb.Close False
+        End If
+    End With
+End Sub
+
+
+'==============================================================================
+' 「実行」ボタン
+'==============================================================================
+Private Sub ButtonExecute_Click()
+    If MsgBox("転記処理を開始します。よろしいですか？", vbYesNo + vbQuestion, "実行確認") = vbYes Then
+        Me.Hide
+        Call ProcessModule.転記処理実行
+        Unload Me
+    End If
+End Sub
+
+'==============================================================================
+' 「キャンセル」ボタン
+'==============================================================================
+Private Sub ButtonCancel_Click()
+    Unload Me
+End Sub
+```
+
+-----
+
+### 6\. ユーザーフォーム: `UserForm_Progress`
+
+#### ユーザーフォームのコントロール設定
+
+| コントロール種類 | 名前 | 用途 |
+| :--- | :--- | :--- |
+| Label | LabelProgress | 「処理中: X / Y」を表示 |
+| Label | LabelFileName | 現在処理中のファイル名を表示 |
+| Label | LabelPercentage | 「XX%」を表示 |
+| Label | LabelTime | 残り時間を表示 |
+| Frame | FrameProgress | プログレスバーの外枠 |
+| Label | BarProgress | プログレスバー本体（Frameの中に入れる） |
+
+#### `UserForm_Progress` のコード
+
+```vb
+'==============================================================================
+' Form: UserForm_Progress
+' 説明: 処理中の進捗表示
+'==============================================================================
+Option Explicit
+
+'==============================================================================
+' フォーム初期化
+'==============================================================================
+Private Sub UserForm_Initialize()
+    Me.Caption = "処理中..."
+    Me.LabelProgress.Caption = "処理の準備をしています..."
+    Me.LabelFileName.Caption = ""
+    Me.LabelPercentage.Caption = "0%"
+    Me.LabelTime.Caption = "残り時間: 計算中..."
+    Me.BarProgress.Width = 0
+End Sub
+
+'==============================================================================
+' 進捗更新
+'==============================================================================
+Public Sub UpdateProgress(ByVal current As Long, ByVal total As Long, ByVal fileName As String)
+    Dim percentage As Double
+    Dim timeElapsed As Date, timePerFile As Date, timeRemaining As Date
+    
+    percentage = current / total
+    
+    ' --- ラベル更新 ---
+    Me.LabelProgress.Caption = "処理中: " & current & " / " & total
+    Me.LabelFileName.Caption = Mid(fileName, InStrRev(fileName, "\") + 1)
+    Me.LabelPercentage.Caption = Format(percentage, "0%")
+    
+    ' --- プログレスバー更新 ---
+    Me.BarProgress.Width = Me.FrameProgress.Width * percentage
+    
+    ' --- 残り時間予測 ---
+    If current > 1 Then ' 2件目から予測
+        timeElapsed = Now - g_StartTime
+        timePerFile = timeElapsed / (current - 1)
+        timeRemaining = timePerFile * (total - current)
+        Me.LabelTime.Caption = "残り時間: 約 " & Format(timeRemaining, "hh:mm:ss")
+    End If
+
+    DoEvents ' フォームの表示を更新
+End Sub
+```
+
+### ご利用方法
+
+1.  上記手順でマクロをセットアップします。
+2.  `マスタ`シートに処理したいファイルの**A列: フォルダパス**、**B列: ファイル名**を記述します。
+3.  `フォーマット`シートに、転記したいセルへ`TENKI01`、`TENKI02`...と記述します。
+4.  `MainModule`の`データ転記実行`マクロを実行すると、プレビュー画面が表示され、処理を開始できます。
