@@ -1,0 +1,837 @@
+Option Explicit
+
+'==============================================================================
+' Excel複数ファイル データ抽出・転記システム
+' Version: 2.2 (修正版)
+'
+' 機能：
+' - 複数Excelファイルからの自動データ抽出
+' - セル色情報の転記
+' - 詳細なエラーログ
+' - プレビュー機能
+' - 進捗表示（残り時間付き）
+' - フォーマットシートの番号チェック機能（重複・欠番）
+' - TENKI番号を1～500に限定
+'==============================================================================
+
+' === 定数定義 ===
+Public Const SHEET_FORMAT As String = "フォーマット"
+Public Const SHEET_MASTER As String = "マスタ"
+Public Const PREFIX_TENKI As String = "TENKI_"
+Public Const START_ROW As Long = 3
+Public Const MAX_PREVIEW_ITEMS As Long = 3
+
+' === グローバル変数 ===
+Public g_ProcessedCount As Long      ' 処理成功ファイル数
+Public g_ErrorCount As Long          ' エラー発生数
+Public g_StartTime As Date           ' 処理開始時刻
+Public g_ErrorLog As Collection      ' エラーログコレクション
+Public g_DuplicateTenki As Collection ' 重複したTENKI番号を記録
+Public g_MaxTenkiNum As Long         ' TENKI番号の最大値
+
+'------------------------------------------------------------------------------
+' メイン実行処理
+'------------------------------------------------------------------------------
+Sub データ転記実行()
+    On Error GoTo ErrorHandler
+    
+    ' 前提条件チェック
+    If Not 前提条件チェック() Then
+        Exit Sub
+    End If
+    
+    ' 実行オプション選択
+    Dim result As VbMsgBoxResult
+    result = MsgBox("転記処理を開始します。" & vbCrLf & vbCrLf & _
+                    "プレビューを表示しますか？" & vbCrLf & vbCrLf & _
+                    "はい: プレビュー表示" & vbCrLf & _
+                    "いいえ: すぐに実行", _
+                    vbYesNoCancel + vbQuestion, "実行確認")
+    
+    Select Case result
+        Case vbYes
+            Call 転記プレビュー
+            If MsgBox("転記を実行しますか？", vbYesNo + vbQuestion, "実行確認") = vbYes Then
+                Call 簡易転記処理実行
+            End If
+        Case vbNo
+            Call 簡易転記処理実行
+        Case vbCancel
+            ' キャンセル - 何もしない
+    End Select
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "エラーが発生しました。" & vbCrLf & vbCrLf & _
+           "エラー内容: " & Err.Description & vbCrLf & _
+           "エラー番号: " & Err.Number, vbCritical, "エラー"
+End Sub
+
+'------------------------------------------------------------------------------
+' 前提条件チェック
+'------------------------------------------------------------------------------
+Private Function 前提条件チェック() As Boolean
+    Dim ws As Worksheet
+    Dim hasFormat As Boolean
+    Dim hasMaster As Boolean
+    
+    前提条件チェック = False
+    
+    ' シート存在確認
+    For Each ws In ThisWorkbook.Worksheets
+        If ws.Name = SHEET_FORMAT Then hasFormat = True
+        If ws.Name = SHEET_MASTER Then hasMaster = True
+    Next ws
+    
+    ' エラーメッセージ表示
+    If Not hasFormat Then
+        MsgBox "「" & SHEET_FORMAT & "」シートが見つかりません。" & vbCrLf & _
+               "フォーマットシートを作成してください。", vbExclamation, "シート不足"
+        Exit Function
+    End If
+    
+    If Not hasMaster Then
+        MsgBox "「" & SHEET_MASTER & "」シートが見つかりません。" & vbCrLf & _
+               "マスタシートを作成してください。", vbExclamation, "シート不足"
+        Exit Function
+    End If
+    
+    前提条件チェック = True
+End Function
+
+'------------------------------------------------------------------------------
+' メイン転記処理
+'------------------------------------------------------------------------------
+Sub 簡易転記処理実行()
+    Dim fileList As Collection
+    Dim tenkiDict As Object
+    Dim wsResult As Worksheet
+    Dim i As Long
+    Dim currentRow As Long
+    
+    On Error GoTo ErrorHandler
+    
+    ' 初期化処理
+    Call 初期化処理
+    
+    ' 1. ファイルリスト取得
+    Set fileList = ファイルリスト取得()
+    If Not データ存在確認(fileList, "ファイル") Then Exit Sub
+    
+    MsgBox "対象ファイル数: " & fileList.count & " 件", vbInformation, "確認"
+    
+    ' 2. 転記セル情報取得
+    Set tenkiDict = 転記セル情報取得()
+    If Not データ存在確認(tenkiDict, "転記セル") Then Exit Sub
+    
+    MsgBox "転記セル数: " & tenkiDict.count & " 個", vbInformation, "確認"
+    
+    ' 3. 結果シート作成
+    Set wsResult = 結果シート作成()
+    If wsResult Is Nothing Then
+        MsgBox "結果シートの作成に失敗しました。", vbCritical, "エラー"
+        Exit Sub
+    End If
+    
+    ' 4. 転記処理
+    currentRow = START_ROW
+    Application.StatusBar = "転記処理を開始しています..."
+    
+    For i = 1 To fileList.count
+        ' 詳細進捗表示
+        Call 詳細進捗表示(i, fileList.count, GetFileName(fileList(i)))
+        
+        ' ファイルデータ転記
+        Call ファイルデータ転記(fileList(i), tenkiDict, wsResult, currentRow)
+        currentRow = currentRow + 1
+    Next i
+    
+    ' 後処理
+    Call 後処理(wsResult, tenkiDict)
+    
+    Exit Sub
+    
+ErrorHandler:
+    Application.StatusBar = False
+    MsgBox "転記処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
+           "エラー内容: " & Err.Description & vbCrLf & _
+           "エラー番号: " & Err.Number, vbCritical, "処理エラー"
+End Sub
+
+'------------------------------------------------------------------------------
+' 初期化処理
+'------------------------------------------------------------------------------
+Private Sub 初期化処理()
+    g_ProcessedCount = 0
+    g_ErrorCount = 0
+    g_StartTime = Now
+    Set g_ErrorLog = New Collection
+    Set g_DuplicateTenki = New Collection
+    g_MaxTenkiNum = 0
+    Application.ScreenUpdating = True
+    Application.StatusBar = False
+End Sub
+
+'------------------------------------------------------------------------------
+' データ存在確認
+'------------------------------------------------------------------------------
+Private Function データ存在確認(ByVal dataObj As Object, ByVal dataType As String) As Boolean
+    データ存在確認 = True
+    
+    If dataObj Is Nothing Then
+        データ存在確認 = False
+    ElseIf TypeName(dataObj) = "Collection" Then
+        If dataObj.count = 0 Then データ存在確認 = False
+    ElseIf TypeName(dataObj) = "Dictionary" Then
+        If dataObj.count = 0 Then データ存在確認 = False
+    End If
+    
+    If Not データ存在確認 Then
+        MsgBox "処理対象の" & dataType & "が見つかりません。" & vbCrLf & _
+               "設定を確認してください。", vbExclamation, "データなし"
+    End If
+End Function
+
+'------------------------------------------------------------------------------
+' 後処理
+'------------------------------------------------------------------------------
+Private Sub 後処理(ByVal wsResult As Worksheet, ByVal tenkiDict As Object)
+    ' ステータスバークリア
+    Application.StatusBar = False
+    
+    ' 結果シートの整形
+    Call 結果シート整形(wsResult)
+    
+    ' サマリー追加
+    Call サマリー追加(wsResult, tenkiDict)
+    
+    ' 完了メッセージ
+    Dim msg As String
+    msg = "転記処理が完了しました！" & vbCrLf & vbCrLf
+    msg = msg & "処理ファイル数: " & g_ProcessedCount & " 件" & vbCrLf
+    msg = msg & "エラー数: " & g_ErrorCount & " 件" & vbCrLf
+    msg = msg & "処理時間: " & Format((Now - g_StartTime) * 24 * 60, "0.0") & " 分"
+    
+    MsgBox msg, vbInformation, "処理完了"
+    
+    ' エラーログ出力
+    If g_ErrorCount > 0 Then
+        If MsgBox("エラーが発生しました。" & vbCrLf & _
+                  "エラーログを出力しますか？", vbYesNo + vbQuestion, "エラーログ") = vbYes Then
+            Call エラーログシート作成
+        End If
+    End If
+    
+    ' 設定保存
+    'Call 設定保存 '←この行をコメントアウトする
+    
+    ' 結果シートをアクティブに
+    On Error Resume Next
+    wsResult.Activate
+    wsResult.Range("A1").Select
+    On Error GoTo 0
+End Sub
+
+'------------------------------------------------------------------------------
+' ファイルリスト取得
+'------------------------------------------------------------------------------
+Function ファイルリスト取得() As Collection
+    Dim wsMaster As Worksheet
+    Dim fileList As New Collection
+    Dim lastRow As Long
+    Dim i As Long
+    Dim folderPath As String
+    Dim fileName As String
+    Dim fullPath As String
+    
+    On Error GoTo ErrorHandler
+    
+    Set wsMaster = ThisWorkbook.Worksheets(SHEET_MASTER)
+    lastRow = wsMaster.Cells(wsMaster.Rows.count, "B").End(xlUp).Row
+    
+    ' ヘッダー行チェック
+    If lastRow < 2 Then
+        Set ファイルリスト取得 = fileList
+        Exit Function
+    End If
+    
+    For i = 2 To lastRow
+        folderPath = Trim(CStr(wsMaster.Cells(i, "A").Value))
+        fileName = Trim(CStr(wsMaster.Cells(i, "B").Value))
+        
+        If folderPath <> "" And fileName <> "" Then
+            ' パス結合
+            If Right(folderPath, 1) <> "\" Then
+                folderPath = folderPath & "\"
+            End If
+            
+            fullPath = folderPath & fileName
+            
+            ' ファイル存在確認
+            If FileExists(fullPath) Then
+                fileList.Add fullPath
+            Else
+                Call エラーログ追加(fileName, "ファイルが見つかりません: " & fullPath)
+                g_ErrorCount = g_ErrorCount + 1
+            End If
+        End If
+    Next i
+    
+    Set ファイルリスト取得 = fileList
+    Exit Function
+    
+ErrorHandler:
+    MsgBox "ファイルリスト取得中にエラー: " & Err.Description, vbCritical
+    Set ファイルリスト取得 = fileList
+End Function
+
+'------------------------------------------------------------------------------
+' 転記セル情報取得
+'------------------------------------------------------------------------------
+Function 転記セル情報取得() As Object
+    Dim wsFormat As Worksheet
+    Dim tenkiDict As Object
+    Dim cell As Range
+    Dim cellValue As String
+    Dim tenkiNum As Long
+    
+    On Error GoTo ErrorHandler
+    
+    Set tenkiDict = CreateObject("Scripting.Dictionary")
+    Set wsFormat = ThisWorkbook.Worksheets(SHEET_FORMAT)
+    
+    For Each cell In wsFormat.UsedRange
+        If Not IsError(cell.Value) And Not IsNull(cell.Value) Then
+            
+            cellValue = Trim(CStr(cell.Value))
+            
+            If Left(cellValue, Len(PREFIX_TENKI)) = PREFIX_TENKI Then
+                tenkiNum = Val(Mid(cellValue, Len(PREFIX_TENKI) + 1))
+                
+                ' ★修正：番号が1～500の範囲内かチェック
+                If tenkiNum >= 1 And tenkiNum <= 500 Then
+                    
+                    ' 重複チェック
+                    If Not tenkiDict.Exists(tenkiNum) Then
+                        tenkiDict(tenkiNum) = cell.Row & "," & cell.Column
+                    Else
+                        g_DuplicateTenki.Add tenkiNum ' 重複番号を記録
+                    End If
+                    
+                    ' 最大番号の更新
+                    If tenkiNum > g_MaxTenkiNum Then
+                        g_MaxTenkiNum = tenkiNum
+                    End If
+                End If
+            End If
+        End If
+    Next cell
+    
+    Set 転記セル情報取得 = tenkiDict
+    Exit Function
+    
+ErrorHandler:
+    MsgBox "転記セル情報取得中にエラー: " & Err.Description, vbCritical
+    Set 転記セル情報取得 = tenkiDict
+End Function
+
+
+'------------------------------------------------------------------------------
+' 結果シート作成
+'------------------------------------------------------------------------------
+Function 結果シート作成() As Worksheet
+    Dim wsResult As Worksheet
+    Dim sheetName As String
+    Dim i As Integer
+    
+    On Error GoTo ErrorHandler
+    
+    ' ユニークなシート名生成
+    sheetName = "転記結果_" & Format(Now, "yyyymmdd_HHmmss")
+    
+    ' 同名シートチェック
+    i = 1
+    Do While SheetExists(sheetName)
+        sheetName = "転記結果_" & Format(Now, "yyyymmdd_HHmmss") & "_" & i
+        i = i + 1
+        If i > 100 Then Exit Do ' 無限ループ防止
+    Loop
+    
+    ' シート作成
+    Set wsResult = ThisWorkbook.Worksheets.Add
+    wsResult.Name = sheetName
+    
+    ' ヘッダー設定
+    With wsResult
+        .Cells(1, 1).Value = "転記結果"
+        .Cells(1, 1).Font.Bold = True
+        .Cells(1, 1).Font.Size = 14
+        
+        .Cells(2, 1).Value = "ファイル名"
+        .Cells(2, 1).Font.Bold = True
+    End With
+    
+    Set 結果シート作成 = wsResult
+    Exit Function
+    
+ErrorHandler:
+    Set 結果シート作成 = Nothing
+End Function
+
+'------------------------------------------------------------------------------
+' ファイルデータ転記（色情報対応版）
+'------------------------------------------------------------------------------
+Sub ファイルデータ転記(ByVal filePath As String, _
+                      ByVal tenkiDict As Object, _
+                      ByVal wsResult As Worksheet, _
+                      ByVal outputRow As Long)
+    
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim cellInfo As String
+    Dim cellParts() As String
+    Dim sourceRow As Long
+    Dim sourceCol As Long
+    Dim cellValue As Variant
+    Dim cellColor As Long
+    Dim tenkiNum As Variant
+    
+    On Error GoTo ErrorHandler
+    
+    Application.ScreenUpdating = False
+    
+    ' ファイルを開く
+    Set wb = Workbooks.Open(filePath, ReadOnly:=True, UpdateLinks:=0)
+    Set ws = wb.Worksheets(1)
+    
+    ' ファイル名を記録
+    wsResult.Cells(outputRow, 1).Value = GetFileName(filePath)
+    
+    ' 各TENKI番号の処理
+    For Each tenkiNum In tenkiDict.Keys
+        cellInfo = tenkiDict(tenkiNum)
+        cellParts = Split(cellInfo, ",")
+        
+        If UBound(cellParts) = 1 Then
+            sourceRow = CLng(cellParts(0))
+            sourceCol = CLng(cellParts(1))
+            
+            ' 範囲チェック
+            If sourceRow <= ws.Rows.count And sourceCol <= ws.Columns.count Then
+                ' 値を取得
+                cellValue = ws.Cells(sourceRow, sourceCol).Value
+                
+                ' 色情報を取得
+                cellColor = ws.Cells(sourceRow, sourceCol).Interior.Color
+                
+                ' 結果シートに転記
+                With wsResult.Cells(outputRow, tenkiNum + 1)
+                    .Value = cellValue
+                    .Interior.Color = cellColor
+                End With
+                
+                ' ヘッダー更新（初回のみ）
+                If outputRow = START_ROW Then
+                    With wsResult.Cells(2, tenkiNum + 1)
+                        .Value = PREFIX_TENKI & Format(tenkiNum, "00")
+                        .Font.Bold = True
+                    End With
+                End If
+            End If
+        End If
+    Next tenkiNum
+    
+    ' ファイルを閉じる
+    wb.Close SaveChanges:=False
+    Set wb = Nothing
+    
+    Application.ScreenUpdating = True
+    g_ProcessedCount = g_ProcessedCount + 1
+    
+    Exit Sub
+    
+ErrorHandler:
+    If Not wb Is Nothing Then
+        On Error Resume Next
+        wb.Close SaveChanges:=False
+        Set wb = Nothing
+        On Error GoTo 0
+    End If
+    
+    Application.ScreenUpdating = True
+    Call エラーログ追加(GetFileName(filePath), Err.Description)
+    g_ErrorCount = g_ErrorCount + 1
+End Sub
+
+'------------------------------------------------------------------------------
+' 結果シート整形
+'------------------------------------------------------------------------------
+Sub 結果シート整形(wsResult As Worksheet)
+    On Error GoTo ErrorHandler
+    
+    With wsResult
+        ' ヘッダー行の装飾
+        .Rows(2).Interior.Color = RGB(100, 150, 200)
+        .Rows(2).Font.Bold = True
+        .Rows(2).Font.Color = RGB(255, 255, 255)
+        
+        ' データ行に縞模様
+        Dim lastRow As Long
+        Dim dataRow As Long
+        lastRow = .Cells(.Rows.count, 1).End(xlUp).Row
+        
+        For dataRow = 3 To lastRow
+            If dataRow Mod 2 = 0 Then
+                .Rows(dataRow).Interior.Color = RGB(240, 240, 240)
+            End If
+        Next dataRow
+        
+        ' 罫線
+        If lastRow >= 2 Then
+            .Range(.Cells(2, 1), .Cells(lastRow, .UsedRange.Columns.count)).Borders.LineStyle = xlContinuous
+        End If
+        
+        ' 列幅自動調整
+        .Columns.AutoFit
+        
+        ' ウィンドウ枠の固定
+        On Error Resume Next
+        .Activate
+        .Range("B3").Select
+        ActiveWindow.FreezePanes = True
+        On Error GoTo 0
+    End With
+    
+    Exit Sub
+    
+ErrorHandler:
+    ' エラーは無視して続行
+End Sub
+
+'------------------------------------------------------------------------------
+' エラーログ追加
+'------------------------------------------------------------------------------
+Sub エラーログ追加(fileName As String, errorMsg As String)
+    On Error Resume Next
+    If g_ErrorLog Is Nothing Then Set g_ErrorLog = New Collection
+    
+    Dim errorInfo As String
+    errorInfo = fileName & "|" & errorMsg & "|" & Format(Now, "yyyy/mm/dd hh:mm:ss")
+    g_ErrorLog.Add errorInfo
+    On Error GoTo 0
+End Sub
+
+'------------------------------------------------------------------------------
+' プレビュー機能
+'------------------------------------------------------------------------------
+Sub 転記プレビュー()
+    Dim fileList As Collection
+    Dim tenkiDict As Object
+    Dim msg As String
+    
+    On Error GoTo ErrorHandler
+    
+    ' グローバル変数をプレビュー用に初期化
+    Set g_DuplicateTenki = New Collection
+    g_MaxTenkiNum = 0
+    
+    ' データ取得
+    Set fileList = ファイルリスト取得()
+    Set tenkiDict = 転記セル情報取得()
+    
+    If fileList.count = 0 Or tenkiDict.count = 0 Then
+        MsgBox "プレビューするデータがありません。", vbExclamation, "データなし"
+        Exit Sub
+    End If
+    
+    ' プレビューメッセージ作成
+    msg = "【転記プレビュー】" & vbCrLf & vbCrLf
+    msg = msg & "◆ 処理概要" & vbCrLf
+    msg = msg & "対象ファイル数: " & fileList.count & " 件" & vbCrLf
+    msg = msg & "転記セル数: " & tenkiDict.count & " 個" & vbCrLf & vbCrLf
+    
+    ' サンプルデータ取得
+    msg = msg & "◆ サンプルデータ（最初のファイル）" & vbCrLf
+    msg = msg & "ファイル: " & GetFileName(fileList(1)) & vbCrLf & vbCrLf
+    
+    Call プレビューデータ取得(fileList(1), tenkiDict, msg)
+    
+    MsgBox msg, vbInformation, "転記プレビュー"
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "プレビュー作成中にエラー: " & Err.Description, vbCritical
+End Sub
+
+'------------------------------------------------------------------------------
+' プレビューデータ取得
+'------------------------------------------------------------------------------
+Private Sub プレビューデータ取得(ByVal filePath As String, _
+                                ByVal tenkiDict As Object, _
+                                ByRef msg As String)
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim count As Long
+    Dim tenkiNum As Variant
+    Dim cellInfo As String
+    Dim cellParts() As String
+    Dim sampleData As String
+    
+    On Error GoTo ErrorHandler
+    
+    Application.ScreenUpdating = False
+    Set wb = Workbooks.Open(filePath, ReadOnly:=True, UpdateLinks:=0)
+    
+    If Not wb Is Nothing Then
+        Set ws = wb.Worksheets(1)
+        
+        count = 0
+        For Each tenkiNum In tenkiDict.Keys
+            If count >= MAX_PREVIEW_ITEMS Then Exit For
+            
+            cellInfo = tenkiDict(tenkiNum)
+            cellParts = Split(cellInfo, ",")
+            
+            If UBound(cellParts) = 1 Then
+                sampleData = CStr(ws.Cells(CLng(cellParts(0)), CLng(cellParts(1))).Value)
+                If Len(sampleData) > 50 Then sampleData = Left(sampleData, 50) & "..."
+                msg = msg & PREFIX_TENKI & Format(tenkiNum, "00") & ": " & sampleData & vbCrLf
+                count = count + 1
+            End If
+        Next tenkiNum
+        
+        wb.Close SaveChanges:=False
+    End If
+    
+    Application.ScreenUpdating = True
+    Exit Sub
+    
+ErrorHandler:
+    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+    Application.ScreenUpdating = True
+End Sub
+
+'------------------------------------------------------------------------------
+' 詳細進捗表示
+'------------------------------------------------------------------------------
+Sub 詳細進捗表示(current As Long, total As Long, fileName As String)
+    Dim percent As Double
+    Dim timeElapsed As Double
+    Dim timeRemaining As Double
+    Dim statusMsg As String
+    
+    ' パーセント計算
+    If total > 0 Then
+        percent = (current / total) * 100
+    Else
+        percent = 0
+    End If
+    
+    ' 経過時間計算（秒）
+    timeElapsed = (Now - g_StartTime) * 24 * 60 * 60
+    
+    ' ステータスメッセージ作成
+    statusMsg = "処理中... " & Format(percent, "0.0") & "% "
+    statusMsg = statusMsg & "(" & current & "/" & total & ") "
+    
+    ' 残り時間予測
+    If current > 0 And current < total Then
+        timeRemaining = (timeElapsed / current) * (total - current)
+        
+        If timeRemaining < 60 Then
+            statusMsg = statusMsg & "残り: 約" & Format(timeRemaining, "0") & "秒"
+        ElseIf timeRemaining < 3600 Then
+            statusMsg = statusMsg & "残り: 約" & Format(timeRemaining / 60, "0.0") & "分"
+        Else
+            statusMsg = statusMsg & "残り: 約" & Format(timeRemaining / 3600, "0.0") & "時間"
+        End If
+    End If
+    
+    statusMsg = statusMsg & " - " & fileName
+    Application.StatusBar = statusMsg
+    
+    ' 10件ごとに画面更新
+    If current Mod 10 = 0 Then DoEvents
+End Sub
+
+'------------------------------------------------------------------------------
+' ユーティリティ関数
+'------------------------------------------------------------------------------
+
+' ファイル存在確認
+Function FileExists(filePath As String) As Boolean
+    On Error Resume Next
+    FileExists = (Dir(filePath) <> "")
+    On Error GoTo 0
+End Function
+
+' シート存在確認
+Function SheetExists(sheetName As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(sheetName)
+    SheetExists = Not ws Is Nothing
+    On Error GoTo 0
+End Function
+
+' ファイル名取得
+Function GetFileName(filePath As String) As String
+    Dim pos As Long
+    pos = InStrRev(filePath, "\")
+    If pos > 0 Then
+        GetFileName = Mid(filePath, pos + 1)
+    Else
+        GetFileName = filePath
+    End If
+End Function
+
+'------------------------------------------------------------------------------
+' サマリー追加
+'------------------------------------------------------------------------------
+Sub サマリー追加(wsResult As Worksheet, tenkiDict As Object)
+    Dim lastRow As Long
+    Dim summaryRow As Long
+    Dim i As Long
+    Dim missingNumbers As String
+    Dim duplicateNumbers As String
+    
+    On Error GoTo ErrorHandler
+    
+    lastRow = wsResult.Cells(wsResult.Rows.count, 1).End(xlUp).Row
+    summaryRow = lastRow + 2
+    
+    ' === ここからTENKI番号のチェック処理を追加 ===
+    ' 欠番チェック
+    For i = 1 To g_MaxTenkiNum
+        If Not tenkiDict.Exists(i) Then
+            If missingNumbers = "" Then
+                missingNumbers = i
+            Else
+                missingNumbers = missingNumbers & ", " & i
+            End If
+        End If
+    Next i
+    If missingNumbers = "" Then missingNumbers = "なし"
+
+    ' 重複チェック
+    Dim num As Variant
+    Dim tempDict As Object ' 重複をユニークにするための一時辞書
+    Set tempDict = CreateObject("Scripting.Dictionary")
+    For Each num In g_DuplicateTenki
+        If Not tempDict.Exists(num) Then
+            tempDict.Add num, ""
+            If duplicateNumbers = "" Then
+                duplicateNumbers = num
+            Else
+                duplicateNumbers = duplicateNumbers & ", " & num
+            End If
+        End If
+    Next num
+    If duplicateNumbers = "" Then duplicateNumbers = "なし"
+    ' === チェック処理ここまで ===
+    
+    With wsResult
+        ' サマリータイトル
+        .Cells(summaryRow, 1).Value = "【処理サマリー】"
+        .Cells(summaryRow, 1).Font.Bold = True
+        .Cells(summaryRow, 1).Font.Size = 12
+        
+        ' 処理情報
+        .Cells(summaryRow + 1, 1).Value = "処理日時："
+        .Cells(summaryRow + 1, 2).Value = Format(Now, "yyyy/mm/dd hh:mm:ss")
+        
+        .Cells(summaryRow + 2, 1).Value = "処理時間："
+        .Cells(summaryRow + 2, 2).Value = Format((Now - g_StartTime) * 24 * 60, "0.0") & " 分"
+        
+        .Cells(summaryRow + 3, 1).Value = "処理ファイル数："
+        .Cells(summaryRow + 3, 2).Value = g_ProcessedCount & " 件"
+        
+        .Cells(summaryRow + 4, 1).Value = "エラー数："
+        .Cells(summaryRow + 4, 2).Value = g_ErrorCount & " 件"
+        
+        If g_ErrorCount > 0 Then
+            .Cells(summaryRow + 4, 2).Font.Color = RGB(255, 0, 0)
+        End If
+
+        ' --- フォーマットチェック結果を追加 ---
+        .Cells(summaryRow + 5, 1).Value = "【フォーマットチェック】"
+        .Cells(summaryRow + 5, 1).Font.Bold = True
+        
+        .Cells(summaryRow + 6, 1).Value = "重複番号："
+        .Cells(summaryRow + 6, 2).Value = duplicateNumbers
+        If duplicateNumbers <> "なし" Then .Cells(summaryRow + 6, 2).Font.Color = RGB(255, 0, 0)
+
+        .Cells(summaryRow + 7, 1).Value = "欠番："
+        .Cells(summaryRow + 7, 2).Value = missingNumbers
+        If missingNumbers <> "なし" Then .Cells(summaryRow + 7, 2).Font.Color = RGB(255, 0, 0)
+        ' --- 追加ここまで ---
+        
+        ' サマリー部分を装飾
+        With .Range(.Cells(summaryRow, 1), .Cells(summaryRow + 7, 2))
+            .Interior.Color = RGB(255, 255, 200)
+            .Borders.LineStyle = xlContinuous
+        End With
+    End With
+    
+    Exit Sub
+ErrorHandler:
+    ' エラーは無視
+End Sub
+
+
+'------------------------------------------------------------------------------
+' エラーログシート作成
+'------------------------------------------------------------------------------
+Sub エラーログシート作成()
+    If g_ErrorLog Is Nothing Then Exit Sub
+    If g_ErrorLog.count = 0 Then Exit Sub
+    
+    Dim wsError As Worksheet
+    Dim sheetName As String
+    Dim i As Long
+    Dim errorInfo() As String
+    
+    On Error GoTo ErrorHandler
+    
+    sheetName = "エラーログ_" & Format(Now, "yyyymmdd_HHmmss")
+    Set wsError = ThisWorkbook.Worksheets.Add
+    wsError.Name = sheetName
+    
+    With wsError
+        ' ヘッダー
+        .Cells(1, 1).Value = "エラーログ"
+        .Cells(1, 1).Font.Bold = True
+        .Cells(1, 1).Font.Size = 14
+        
+        .Cells(2, 1).Value = "No."
+        .Cells(2, 2).Value = "ファイル名"
+        .Cells(2, 3).Value = "エラー内容"
+        .Cells(2, 4).Value = "発生時刻"
+        
+        .Range("A2:D2").Interior.Color = RGB(255, 200, 200)
+        .Range("A2:D2").Font.Bold = True
+        
+        ' エラー内容
+        For i = 1 To g_ErrorLog.count
+            errorInfo = Split(g_ErrorLog(i), "|")
+            If UBound(errorInfo) >= 2 Then
+                .Cells(i + 2, 1).Value = i
+                .Cells(i + 2, 2).Value = errorInfo(0)
+                .Cells(i + 2, 3).Value = errorInfo(1)
+                .Cells(i + 2, 4).Value = errorInfo(2)
+            End If
+        Next i
+        
+        .UsedRange.Borders.LineStyle = xlContinuous
+        .Columns.AutoFit
+    End With
+    
+    MsgBox "エラーログを出力しました。" & vbCrLf & _
+           "シート名: " & sheetName, vbInformation, "エラーログ出力"
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "エラーログシートの作成に失敗しました: " & Err.Description, vbCritical
+End Sub
