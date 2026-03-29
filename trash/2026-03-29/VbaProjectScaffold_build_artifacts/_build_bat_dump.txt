@@ -1,0 +1,27 @@
+﻿@echo off
+setlocal enabledelayedexpansion
+
+set "PS_SCRIPT=tools\Build-VbaProject.ps1"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set YMD=%%I
+set "LOG_DIR=logs"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+set "LOG_FILE=%LOG_DIR%\build-%YMD%.log"
+
+echo ========================================
+echo   VBA Project Build Tool v1.0
+echo   %date% %time%
+echo ========================================
+
+echo [INFO] ビルドを開始します...
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" 1>>"%LOG_FILE%" 2>>&1
+set ERR=%ERRORLEVEL%
+if %ERR%==0 (
+  echo [SUCCESS] ビルドが完了しました。成果物: build\
+) else (
+  echo [ERROR] ビルドに失敗しました。ログ: %LOG_FILE%
+)
+
+endlocal
+pause
+

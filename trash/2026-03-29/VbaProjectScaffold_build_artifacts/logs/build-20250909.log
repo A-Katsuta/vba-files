@@ -1,0 +1,119 @@
+[2025-09-09 01:12:36] [INFO] Excel起動
+[2025-09-09 01:12:37] [INFO] テンプレートからブック作成
+[2025-09-09 01:12:37] [ERROR] 予期せぬエラー: "Add" の設定中に例外が発生しました: 型 "PathInfo" の "C:\github-vba-lab\VBA-\template\BaseTemplate.xltm" 値を型 "Object" に変換できません。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:3 文字:13
++     [string] = ".\template\BaseTemplate.xltm",
++             ~
+パラメーターの宣言は、オプションの初期化子式で使用する変数名のコンマ区切り一覧です。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:3 文字:13
++     [string] = ".\template\BaseTemplate.xltm",
++             ~
+関数パラメーター一覧に ')' が存在しません。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:13 文字:19
++     param([string], [string] = 'INFO')
++                   ~
+パラメーターの宣言は、オプションの初期化子式で使用する変数名のコンマ区切り一覧です。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:13 文字:19
++     param([string], [string] = 'INFO')
++                   ~
+関数パラメーター一覧に ')' が存在しません。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:15 文字:15
++      = switch(){ 'ERROR'{'Red'} 'WARNING'{'Yellow'} 'SUCCESS'{'Green' ...
++               ~
+式が '(' の後に必要です。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:15 文字:25
++      = switch(){ 'ERROR'{'Red'} 'WARNING'{'Yellow'} 'SUCCESS'{'Green' ...
++                         ~
+式またはステートメントのトークン '{' を使用できません。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:15 文字:33
++      = switch(){ 'ERROR'{'Red'} 'WARNING'{'Yellow'} 'SUCCESS'{'Green' ...
++                                 ~~~~~~~~~
+式またはステートメントのトークン ''WARNING'' を使用できません。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:15 文字:42
++      = switch(){ 'ERROR'{'Red'} 'WARNING'{'Yellow'} 'SUCCESS'{'Green' ...
++                                          ~
+式またはステートメントのトークン '{' を使用できません。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:15 文字:53
++      = switch(){ 'ERROR'{'Red'} 'WARNING'{'Yellow'} 'SUCCESS'{'Green' ...
++                                                     ~~~~~~~~~
+式またはステートメントのトークン ''SUCCESS'' を使用できません。
+発生場所 C:\github-vba-lab\VBA-\tools\Build-VbaProject.ps1:15 文字:62
++ ...     = switch(){ 'ERROR'{'Red'} 'WARNING'{'Yellow'} 'SUCCESS'{'Green'} ...
++                                                                 ~
+式またはステートメントのトークン '{' を使用できません。
+報告されていない解析エラーもあります。報告されたエラーを修正して再試行してください。
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : InvalidFunctionParameter
+ 
+[2025-09-09 01:15:10] [INFO] Excel起動
+[2025-09-09 01:15:10] [INFO] テンプレートからブック作成
+[2025-09-09 01:15:11] [INFO] VBAモジュールをインポートします: .\src\vba
+
+
+Saved           : True
+Name            : Module1
+Designer        : 
+CodeModule      : System.__ComObject
+Type            : 1
+VBE             : System.__ComObject
+Collection      : System.__ComObject
+HasOpenDesigner : False
+Properties      : System.__ComObject
+DesignerID      : 
+
+[2025-09-09 01:15:11] [INFO]  [OK] Main.bas
+Saved           : True
+Name            : Module2
+Designer        : 
+CodeModule      : System.__ComObject
+Type            : 1
+VBE             : System.__ComObject
+Collection      : System.__ComObject
+HasOpenDesigner : False
+Properties      : System.__ComObject
+DesignerID      : 
+
+[2025-09-09 01:15:11] [INFO]  [OK] Utils.bas
+Saved           : True
+Name            : DataManager
+Designer        : 
+CodeModule      : System.__ComObject
+Type            : 1
+VBE             : System.__ComObject
+Collection      : System.__ComObject
+HasOpenDesigner : False
+Properties      : System.__ComObject
+DesignerID      : 
+
+[2025-09-09 01:15:11] [INFO]  [OK] DataManager.cls
+[2025-09-09 01:15:11] [INFO] 参照設定の追加を試行します
+Collection  : System.__ComObject
+VBE         : System.__ComObject
+Name        : Scripting
+Guid        : {420B2830-E718-11CF-893D-00A0C9054228}
+Major       : 1
+Minor       : 0
+FullPath    : C:\Windows\System32\scrrun.dll
+BuiltIn     : False
+IsBroken    : False
+Type        : 0
+Description : Microsoft Scripting Runtime
+
+[2025-09-09 01:15:11] [INFO]  [追加] Microsoft Scripting Runtime
+Collection  : System.__ComObject
+VBE         : System.__ComObject
+Name        : ADODB
+Guid        : {B691E011-1797-432E-907A-4D8C69339129}
+Major       : 6
+Minor       : 1
+FullPath    : C:\Program Files\Common Files\System\ado\msado15.dll
+BuiltIn     : False
+IsBroken    : False
+Type        : 0
+Description : Microsoft ActiveX Data Objects 6.1 Library
+
+[2025-09-09 01:15:11] [INFO]  [追加] Microsoft ActiveX Data Objects 6.1 Library
+[2025-09-09 01:15:11] [INFO] 保存: C:\github-vba-lab\VBA-\build\Output_20250909_011510.xlsm
+[2025-09-09 01:15:11] [SUCCESS] ビルド完了
+
+

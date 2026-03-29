@@ -1,0 +1,14 @@
+﻿# Build artifacts
+build/
+logs/
+
+# Excel temp files
+~$*
+*.tmp
+*.bak
+*.lock
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/

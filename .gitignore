@@ -1,0 +1,5 @@
+~$*.xlsm
+~$*.xlsx
+~$*.xls
+tooling/VbaProjectScaffold/build/
+tooling/VbaProjectScaffold/logs/

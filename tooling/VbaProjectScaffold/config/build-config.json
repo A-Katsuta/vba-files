@@ -1,0 +1,33 @@
+﻿{
+  "TemplatePath": ".\\template\\BaseTemplate.xltm",
+  "SourcePath": ".\\src\\vba",
+  "OutputPath": ".\\build",
+  "OutputFileName": "Output_#{timestamp}.xlsm",
+  "LogDirectory": ".\\logs",
+  "OutputRetentionDays": 30,
+  "Workbook": {
+    "Sheets": [
+      { "Name": "入力", "TabColor": "#5B9BD5" },
+      { "Name": "集計", "TabColor": "#A5A5A5" },
+      { "Name": "マスタ", "TabColor": "#70AD47" },
+      { "Name": "Logs", "TabColor": "#BFBFBF", "VeryHidden": true }
+    ]
+  },
+  "VersionInfo": {
+    "Sheet": "集計",
+    "LabelColumn": "E",
+    "ValueColumn": "F",
+    "VersionLabel": "バージョン番号",
+    "ReleaseDateLabel": "リリース日",
+    "OwnerLabel": "担当者",
+    "ChangeSummaryLabel": "変更点メモ",
+    "ChangeSummaryRange": "F6:F10",
+    "DefaultOwner": "",
+    "DefaultChangeSummary": "自動ビルド"
+  },
+  "References": [
+    { "Name": "Microsoft Scripting Runtime", "GUID": "{420B2830-E718-11CF-893D-00A0C9054228}", "Major": 1, "Minor": 0 },
+    { "Name": "Microsoft ActiveX Data Objects 6.1 Library", "GUID": "{B691E011-1797-432E-907A-4D8C69339129}", "Major": 6, "Minor": 1 }
+  ]
+}
+

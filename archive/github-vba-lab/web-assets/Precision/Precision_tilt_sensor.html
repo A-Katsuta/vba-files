@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>傾斜角センサー</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+            color: #ffffff;
+            overflow: hidden;
+            height: 100vh;
+            touch-action: none;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00f2fe, #4facfe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status {
+            font-size: 14px;
+            color: #888;
+            padding: 8px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .status.active {
+            color: #4facfe;
+            background: rgba(79, 172, 254, 0.1);
+        }
+
+        .main-display {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        .bubble-container {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            margin-bottom: 30px;
+        }
+
+        .bubble-outer {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 3px solid rgba(79, 172, 254, 0.3);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(79, 172, 254, 0.2),
+                        inset 0 0 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+        }
+
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .crosshair::before {
+            left: 50%;
+            top: 0;
+            width: 1px;
+            height: 100%;
+            transform: translateX(-50%);
+        }
+
+        .crosshair::after {
+            top: 50%;
+            left: 0;
+            height: 1px;
+            width: 100%;
+            transform: translateY(-50%);
+        }
+
+        .center-circle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .bubble {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #00f2fe, #4facfe);
+            box-shadow: 0 0 30px rgba(79, 172, 254, 0.8),
+                        inset -5px -5px 10px rgba(0, 0, 0, 0.3),
+                        inset 5px 5px 10px rgba(255, 255, 255, 0.3);
+            transition: all 0.1s ease-out;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .angle-display {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            width: 100%;
+            max-width: 350px;
+            margin-bottom: 20px;
+        }
+
+        .angle-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(79, 172, 254, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .angle-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .angle-value {
+            font-size: 28px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            background: linear-gradient(90deg, #00f2fe, #4facfe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .precision-indicator {
+            width: 100%;
+            max-width: 350px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(79, 172, 254, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .precision-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .precision-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .precision-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4facfe, #00f2fe);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(79, 172, 254, 0.5);
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
+        }
+
+        .btn-start:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px 10px rgba(79, 172, 254, 0.4);
+        }
+
+        .btn-calibrate {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-calibrate:active {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .settings {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(79, 172, 254, 0.3);
+            border-radius: 12px;
+            max-width: 350px;
+            width: 100%;
+        }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .setting-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .setting-label {
+            font-size: 13px;
+            color: #ccc;
+        }
+
+        .toggle {
+            position: relative;
+            width: 50px;
+            height: 26px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 13px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .toggle.active {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+
+        .toggle.active .toggle-slider {
+            transform: translateX(24px);
+        }
+
+        .sensor-label {
+            position: absolute;
+            bottom: 12px;
+            right: 22px;
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>傾斜角センサー</h1>
+            <div class="status" id="status">センサー待機中...</div>
+        </div>
+
+        <div class="main-display">
+            <div class="bubble-container">
+                <div class="bubble-outer">
+                    <div class="crosshair"></div>
+                    <div class="center-circle"></div>
+                    <div class="bubble" id="bubble"></div>
+                </div>
+            </div>
+
+            <div class="angle-display">
+                <div class="angle-item">
+                    <div class="angle-label">X軸 (左右)</div>
+                    <div class="angle-value" id="angleX">0.0°</div>
+                </div>
+                <div class="angle-item">
+                    <div class="angle-label">Y軸 (前後)</div>
+                    <div class="angle-value" id="angleY">0.0°</div>
+                </div>
+            </div>
+
+            <div class="precision-indicator">
+                <div class="precision-label">傾斜度: <span id="tiltLevel">0%</span></div>
+                <div class="precision-bar">
+                    <div class="precision-fill" id="precisionFill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button class="btn btn-start" id="startBtn" onclick="requestPermission()">センサー起動</button>
+                <button class="btn btn-calibrate" id="calibrateBtn" onclick="calibrate()">キャリブレーション</button>
+            </div>
+
+            <div class="settings">
+                <div class="setting-row">
+                    <span class="setting-label">音声フィードバック</span>
+                    <div class="toggle active" id="soundToggle" onclick="toggleSound()">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">連続音モード</span>
+                    <div class="toggle" id="continuousToggle" onclick="toggleContinuous()">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="sensor-label">JJ-27</div>
+
+        </div>
+    </div>
+
+    <script>
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let oscillator = null;
+        let gainNode = null;
+        let continuousPanner = null;
+        let isActive = false;
+        let soundEnabled = true;
+        let continuousMode = false;
+        let calibrationOffset = { x: 0, y: 0 };
+        let lastSoundTime = 0;
+        let lastPattern = 'steady';
+        const BASE_SOUND_INTERVAL = 180;
+
+        function createTone(frequency, volume = 0.1, options = {}) {
+            if (!soundEnabled) return;
+
+            const {
+                type = 'sine',
+                pan = 0,
+                pattern = 'steady',
+                interval = BASE_SOUND_INTERVAL
+            } = options;
+
+            if (pattern !== lastPattern) {
+                lastSoundTime = 0;
+                lastPattern = pattern;
+            }
+
+            if (continuousMode) {
+                if (!oscillator) {
+                    oscillator = audioContext.createOscillator();
+                    gainNode = audioContext.createGain();
+                    if (audioContext.createStereoPanner) {
+                        continuousPanner = audioContext.createStereoPanner();
+                        gainNode.connect(continuousPanner);
+                        continuousPanner.connect(audioContext.destination);
+                    } else {
+                        continuousPanner = null;
+                        gainNode.connect(audioContext.destination);
+                    }
+                    oscillator.connect(gainNode);
+                    oscillator.start();
+                }
+                oscillator.type = type;
+                oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+                if (continuousPanner) {
+                    continuousPanner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), audioContext.currentTime);
+                }
+                const audioNow = audioContext.currentTime;
+                gainNode.gain.cancelScheduledValues(audioNow);
+                switch (pattern) {
+                    case 'horizontal-pulse':
+                        gainNode.gain.setValueAtTime(0.0001, audioNow);
+                        gainNode.gain.linearRampToValueAtTime(volume, audioNow + 0.05);
+                        gainNode.gain.linearRampToValueAtTime(0.0001, audioNow + 0.12);
+                        gainNode.gain.linearRampToValueAtTime(volume * 0.85, audioNow + 0.18);
+                        gainNode.gain.linearRampToValueAtTime(0.0001, audioNow + 0.28);
+                        break;
+                    case 'vertical-swell':
+                        gainNode.gain.setValueAtTime(volume * 0.2, audioNow);
+                        gainNode.gain.linearRampToValueAtTime(volume, audioNow + 0.12);
+                        gainNode.gain.linearRampToValueAtTime(volume * 0.2, audioNow + 0.4);
+                        break;
+                    default:
+                        gainNode.gain.setValueAtTime(volume, audioNow);
+                        break;
+                }
+            } else {
+                const now = Date.now();
+                if (now - lastSoundTime < interval) return;
+                lastSoundTime = now;
+
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                osc.type = type;
+                osc.frequency.value = frequency;
+
+                if (audioContext.createStereoPanner) {
+                    const panner = audioContext.createStereoPanner();
+                    panner.pan.value = Math.max(-1, Math.min(1, pan));
+                    osc.connect(gain);
+                    gain.connect(panner);
+                    panner.connect(audioContext.destination);
+                } else {
+                    osc.connect(gain);
+                    gain.connect(audioContext.destination);
+                }
+
+                const audioNow = audioContext.currentTime;
+                switch (pattern) {
+                    case 'horizontal-pulse':
+                        gain.gain.setValueAtTime(0.0001, audioNow);
+                        gain.gain.linearRampToValueAtTime(volume, audioNow + 0.04);
+                        gain.gain.linearRampToValueAtTime(0.0001, audioNow + 0.11);
+                        gain.gain.linearRampToValueAtTime(volume * 0.8, audioNow + 0.17);
+                        gain.gain.linearRampToValueAtTime(0.0001, audioNow + 0.26);
+                        osc.start(audioNow);
+                        osc.stop(audioNow + 0.3);
+                        break;
+                    case 'vertical-swell':
+                        gain.gain.setValueAtTime(0.0001, audioNow);
+                        gain.gain.linearRampToValueAtTime(volume, audioNow + 0.12);
+                        gain.gain.linearRampToValueAtTime(0.0001, audioNow + 0.42);
+                        osc.start(audioNow);
+                        osc.stop(audioNow + 0.46);
+                        break;
+                    default:
+                        gain.gain.value = volume;
+                        osc.start(audioNow);
+                        gain.gain.exponentialRampToValueAtTime(0.01, audioNow + 0.2);
+                        osc.stop(audioNow + 0.25);
+                        break;
+                }
+            }
+        }
+        function stopContinuousTone() {
+            if (!oscillator) return;
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
+            oscillator.stop(audioContext.currentTime + 0.12);
+            oscillator = null;
+            gainNode = null;
+            if (continuousPanner) {
+                continuousPanner.disconnect();
+                continuousPanner = null;
+            }
+        }
+
+        async function requestPermission() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') {
+                        startSensor();
+                    } else {
+                        alert('センサーの使用許可が得られませんでした');
+                    }
+                } catch (error) {
+                    console.error('Permission error:', error);
+                    alert('センサーアクセスエラー: ' + error.message);
+                }
+            } else {
+                startSensor();
+            }
+        }
+
+        function startSensor() {
+            if (isActive) return;
+            window.addEventListener('deviceorientation', handleOrientation, true);
+            isActive = true;
+            document.getElementById('status').textContent = 'センサー稼働中';
+            document.getElementById('status').classList.add('active');
+            const startBtn = document.getElementById('startBtn');
+            startBtn.textContent = 'センサー停止';
+            startBtn.onclick = stopSensor;
+        }
+
+        function stopSensor() {
+            window.removeEventListener('deviceorientation', handleOrientation, true);
+            isActive = false;
+            stopContinuousTone();
+            document.getElementById('status').textContent = 'センサー待機中...';
+            document.getElementById('status').classList.remove('active');
+            const startBtn = document.getElementById('startBtn');
+            startBtn.textContent = 'センサー起動';
+            startBtn.onclick = requestPermission;
+        }
+
+        function handleOrientation(event) {
+            const gamma = event.gamma - calibrationOffset.x;
+            const beta = event.beta - calibrationOffset.y;
+
+            const clampedGamma = Math.max(-45, Math.min(45, gamma));
+            const clampedBeta = Math.max(-45, Math.min(45, beta));
+
+            document.getElementById('angleX').textContent = gamma.toFixed(1) + '°';
+            document.getElementById('angleY').textContent = beta.toFixed(1) + '°';
+
+            const maxOffset = 140;
+            const bubbleX = (clampedGamma / 45) * maxOffset;
+            const bubbleY = (clampedBeta / 45) * maxOffset;
+
+            const bubble = document.getElementById('bubble');
+            bubble.style.transform = `translate(calc(-50% + ${bubbleX}px), calc(-50% + ${bubbleY}px))`;
+
+            const totalTilt = Math.sqrt(gamma * gamma + beta * beta);
+            const tiltPercent = Math.min(100, (totalTilt / 45) * 100);
+            document.getElementById('tiltLevel').textContent = tiltPercent.toFixed(0) + '%';
+            document.getElementById('precisionFill').style.width = tiltPercent + '%';
+
+            if (soundEnabled) {
+                const absGamma = Math.abs(gamma);
+                const absBeta = Math.abs(beta);
+                const horizontalDominant = absGamma >= absBeta;
+
+                if (totalTilt > 1) {
+                    const normalizedTilt = Math.min(1, totalTilt / 45);
+                    const baseVolume = Math.max(0.04, Math.min(0.2, normalizedTilt * 0.2));
+
+                    if (horizontalDominant) {
+                        const panValue = Math.max(-1, Math.min(1, gamma / 30));
+                        const frequency = 340 + (gamma * 6);
+                        createTone(frequency, baseVolume, {
+                            type: 'square',
+                            pan: panValue,
+                            pattern: 'horizontal-pulse',
+                            interval: 140
+                        });
+                    } else {
+                        const directionOffset = beta >= 0 ? 40 : -40;
+                        const frequency = 760 + (beta * 4) + directionOffset;
+                        createTone(frequency, baseVolume, {
+                            type: 'sine',
+                            pan: 0,
+                            pattern: 'vertical-swell',
+                            interval: 240
+                        });
+                    }
+                } else {
+                    stopContinuousTone();
+                }
+            }
+        }
+
+        function calibrate() {
+            if (!isActive) {
+                alert('先にセンサーを起動してください');
+                return;
+            }
+
+            window.addEventListener('deviceorientation', function calibrationHandler(event) {
+                calibrationOffset.x = event.gamma;
+                calibrationOffset.y = event.beta;
+                window.removeEventListener('deviceorientation', calibrationHandler, true);
+                alert('キャリブレーション完了');
+            }, { once: true });
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            document.getElementById('soundToggle').classList.toggle('active');
+            if (!soundEnabled) {
+                stopContinuousTone();
+            }
+        }
+
+        function toggleContinuous() {
+            continuousMode = !continuousMode;
+            document.getElementById('continuousToggle').classList.toggle('active');
+            if (!continuousMode) {
+                stopContinuousTone();
+            }
+        }
+
+        document.getElementById('status').textContent = 'センサー待機中...';
+    </script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+﻿[CmdletBinding()]
+param(
+    [string] = ".\template\BaseTemplate.xltm",
+    [string] = ".\src\vba",
+    [string] = ".\build",
+    [string] = "Output_20250909_011353.xlsm"
+)
+
+Stop = 'Stop'
+ = 
+
+function Write-BuildLog {
+    param([string], [string] = 'INFO')
+     = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+     = switch(){ 'ERROR'{'Red'} 'WARNING'{'Yellow'} 'SUCCESS'{'Green'} default{'White'} }
+    Write-Host "[] [] " -ForegroundColor 
+}
+
+function Clear-ExcelProcess {
+    if () {
+        try {
+            .DisplayAlerts = False
+            .Quit()
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject()
+            Remove-Variable -Name Excel -Scope Script -ErrorAction SilentlyContinue
+        } catch {
+            Write-BuildLog "Excelプロセスの終了で警告: " 'WARNING'
+        }
+    }
+    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+}
+
+trap {
+    Write-BuildLog "予期しないエラー: " 'ERROR'
+    Clear-ExcelProcess
+    exit 1
+}
+
+function Import-VBAModules {
+    param(, [string])
+    Write-BuildLog "VBAモジュールをインポートします: "
+     = Get-ChildItem -Path  -Filter *.bas -Recurse -ErrorAction SilentlyContinue
+    foreach( in ){
+        try { .VBComponents.Import(.FullName); Write-BuildLog " [OK] " } catch { Write-BuildLog " [FAIL] : " 'ERROR'; throw }
+    }
+     = Get-ChildItem -Path  -Filter *.cls -Recurse -ErrorAction SilentlyContinue
+    foreach( in ){
+        try { .VBComponents.Import(.FullName); Write-BuildLog " [OK] " } catch { Write-BuildLog " [FAIL] : " 'ERROR'; throw }
+    }
+}
+
+function Add-References {
+    param()
+    Write-BuildLog "参照設定の追加を試行します"
+     = @(
+        @{ Name='Microsoft Scripting Runtime'; GUID='{420B2830-E718-11CF-893D-00A0C9054228}'; Major=1; Minor=0 },
+        @{ Name='Microsoft ActiveX Data Objects 6.1 Library'; GUID='{B691E011-1797-432E-907A-4D8C69339129}'; Major=6; Minor=1 }
+    )
+    foreach( in ){
+        try {
+             = False
+            foreach( in .References){ if(.GUID -eq .GUID){ =True; break } }
+            if(-not ){ .References.AddFromGuid(.GUID, .Major, .Minor); Write-BuildLog " [追加] " } else { Write-BuildLog " [既存] " }
+        } catch {
+            Write-BuildLog " [警告] 参照追加に失敗: : " 'WARNING'
+        }
+    }
+}
+
+try {
+    # テンプレートパスのフォールバック
+    if(-not (Test-Path )){
+         = Get-ChildItem -Path (Split-Path  -Parent) -Filter *.xltm -ErrorAction SilentlyContinue | Select-Object -First 1
+        if(){  = .FullName }
+    }
+    if(-not (Test-Path )) { throw "テンプレートファイルが見つかりません: " }
+    if(-not (Test-Path ))   { throw "ソースフォルダが見つかりません: " }
+    if(-not (Test-Path ))   { New-Item -ItemType Directory -Path  -Force | Out-Null; Write-BuildLog "出力フォルダ作成: " }
+
+    Write-BuildLog 'Excel起動'
+     = New-Object -ComObject Excel.Application
+    .Visible = False
+    .DisplayAlerts = False
+
+    Write-BuildLog 'テンプレートからブック作成'
+     = (Resolve-Path ).Path
+     = .Workbooks.Add()
+
+    try {  = .VBProject } catch { throw "VBAプロジェクトにアクセスできません。Excelの[マクロ セキュリティ]で『VBAプロジェクト オブジェクトモデルへの信頼アクセス』を有効にしてください。" }
+
+    Import-VBAModules -VBProject  -SourcePath 
+    Add-References -VBProject 
+
+     = Join-Path ((Resolve-Path ).Path) 
+    Write-BuildLog "保存: "
+    .SaveAs(, 52) # 52=xlOpenXMLWorkbookMacroEnabled
+    .Close(False)
+    Write-BuildLog 'ビルド完了' 'SUCCESS'
+} finally { Clear-ExcelProcess }
